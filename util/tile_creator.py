@@ -15,6 +15,7 @@ from typing import List, Literal
 
 class TileCreator:
     _gdal2tilesEntries = dict()
+    transparent_image = Image.new('RGBA', (256, 256), (255, 255, 255, 0))
 
     def create_tile(self, tile_request: TileCreateRequest):
 
@@ -99,7 +100,6 @@ class TileCreator:
                 return 0
 
             if entry.z >= entry.startCreateTileZoom:
-                print("Creating Tile by origin file: %d : %d : %d" % (entry.z, entry.x, entry.y))
                 self._create_tile_by_origin_file(entry)
                 return 1
 
@@ -107,10 +107,7 @@ class TileCreator:
             children: List[TileCreateRequest] = entry.get_children()
             for child in children:
                 if max_create - created_tiles > 0:
-                    print("Before: %d - %d = %d" % (max_create, created_tiles, max_create - created_tiles))
-                    how_created = _create_tile_hierarchy(child, max_create - created_tiles)
-                    print("How Created: %d" % how_created)
-                    created_tiles += how_created
+                    created_tiles += _create_tile_hierarchy(child, max_create - created_tiles)
 
             _create_tile_if_child_exists(entry)
 
@@ -119,14 +116,19 @@ class TileCreator:
         _create_tile_hierarchy(tile_request, 4)
 
     def _create_tile_by_origin_file(self, tile_request: TileCreateRequest):
+        tile_file_path = tile_request.get_tile_path()
+
         gdal_2_tiles: GDAL2Tiles = self._get_gdal_2_tile_entry(tile_request)
 
         tile_job_info = self._get_tile_job_info(gdal_2_tiles)
 
-        tile_detail = self._get_tile_detail(gdal_2_tiles, tile_request)
-
-        tile_file_path = tile_request.get_tile_path()
         os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
+
+        if self._is_empty_tile(tile_job_info, tile_request):
+            self.transparent_image.save(tile_file_path)
+            return
+
+        tile_detail = self._get_tile_detail(gdal_2_tiles, tile_request)
 
         data_bands_count = tile_job_info.nb_data_bands
         tile_size = tile_job_info.tile_size
@@ -145,7 +147,6 @@ class TileCreator:
         data = alpha = None
 
         if tile_detail.rxsize != 0 and tile_detail.rysize != 0 and tile_detail.wxsize != 0 and tile_detail.wysize != 0:
-            print(tile_detail.wysize)
             alpha = alpha_band.ReadRaster(tile_detail.rx, tile_detail.ry, tile_detail.rxsize, tile_detail.rysize,
                                           tile_detail.wxsize, tile_detail.wysize)
 
@@ -353,3 +354,16 @@ class TileCreator:
             return gdal.GRA_Q3
 
         return 0
+
+    @staticmethod
+    def _is_empty_tile(tile_info: TileJobInfo, tile_request: TileCreateRequest) -> bool:
+        zoom_info = tile_info.tminmax[tile_request.z]
+
+        tms = tile_request.get_tms_position()
+
+        if zoom_info[0] <= tms[1] <= zoom_info[2]:
+            if zoom_info[1] <= tms[2] <= zoom_info[3]:
+                return False
+
+        return True
+

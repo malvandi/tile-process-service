@@ -25,6 +25,7 @@ def init_tile_create_requests():
             print('Creating tile: ' + tile_request.model_dump_json(), flush=True)
             tile_creator.create_tile(tile_request)
         except Exception as exception:
+            exception.with_traceback()
             print('Occur Error in creating tile: %s with error: %s' % (data_dict, repr(exception)), flush=True)
 
     print('Listening to TILE_CREATE_REQUEST messages ...', flush=True)
@@ -57,9 +58,15 @@ def init_raster_info_requests():
 
 def run_test():
     tile = TileCreateRequest()
+    # tile.z = 15
+    # tile.x = 21067
+    # tile.y = 12903
+
     tile.z = 15
     tile.x = 21067
     tile.y = 12900
+    tile.startCreateTileZoom = 15
+    tile.resampling = 'bilinear'
     tile.file = "tehran-now.tif"
     tile.directory = "{base_directory}"
     tile.startPoint = 'TOP_LEFT'

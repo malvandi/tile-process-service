@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import List
 
 from util.environment_loader import load_base_directory, load_upload_base_directory
 
@@ -27,6 +28,8 @@ class TileCreateRequest(RabbitMessage):
     z: int = 0
     x: int = 0
     y: int = 0
+    startCreateTileZoom: int = 0
+    resampling: str = 'near'
     startPoint: str = 'TOP_LEFT'
     pattern: str = 'morteza/{z}/{x}/{y}.png'
 
@@ -47,6 +50,25 @@ class TileCreateRequest(RabbitMessage):
         return tile_path.replace('{z}', str(self.z)) \
             .replace('{x}', str(self.x)) \
             .replace('{y}', str(self.y))
+
+    def get_children(self) -> List['TileCreateRequest']:
+        returned = []
+        for i in range(2):
+            for j in range(2):
+                child = TileCreateRequest()
+                child.z = self.z + 1
+                child.x = self.x * 2 + i
+                child.y = self.y * 2 + j
+                child.startCreateTileZoom = self.startCreateTileZoom
+                child.resampling = self.resampling
+                child.startPoint = self.startPoint
+                child.pattern = self.pattern
+                child.file = self.file
+                child.directory = self.directory
+
+                returned.append(child)
+
+        return returned
 
 
 class LayerInfoRequest(RabbitMessage):

@@ -2,6 +2,7 @@ import os
 
 import numpy
 from PIL import Image
+from PIL.Image import Resampling
 from gdal2tiles import GDAL2Tiles, TileJobInfo
 from osgeo import gdal
 import osgeo.gdal_array as gdalarray
@@ -9,6 +10,7 @@ from osgeo_utils.gdal2tiles import numpy_available, TileDetail
 
 from model.gdal_2_tiles_options import GDAL2TilesOptions
 from model.rabbit_message import TileCreateRequest
+from typing import List, Literal
 
 
 class TileCreator:
@@ -18,21 +20,113 @@ class TileCreator:
 
         tile_file_path = tile_request.get_tile_path()
 
+        # if os.path.exists(tile_file_path):  # TODO(remove)
+        #     os.remove(tile_request.get_tile_path())
+
+        # os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
         if os.path.exists(tile_file_path):
             return
 
-        os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
+        if tile_request.startCreateTileZoom > tile_request.z:
+            self._create_tile_by_child(tile_request)
+            return
 
+        self._create_tile_by_origin_file(tile_request)
+
+    def _create_tile_by_child(self, tile_request: TileCreateRequest):
+        def _get_image_resize_resampling(resampling: str) -> Literal[int]:
+            if resampling == 'nearest' or resampling == 'near':
+                return Image.NEAREST
+
+            if resampling == 'average':
+                return Image.LINEAR
+
+            if resampling == 'bilinear':
+                return Image.BILINEAR
+
+            if resampling == 'cubic' or resampling == 'cubicspline':
+                return Image.CUBIC
+
+            if resampling == 'lanczos':
+                return Image.LANCZOS
+
+            if resampling == 'antialias':
+                return Image.ANTIALIAS
+
+            if resampling == 'max':
+                return Image.MAXCOVERAGE
+
+            if resampling == 'med':
+                return Image.MEDIANCUT
+
+            return Image.NEAREST
+
+        def _create_tile_if_child_exists(entry: TileCreateRequest):
+            children: List[TileCreateRequest] = entry.get_children()
+            for child in children:
+                if not os.path.exists(child.get_tile_path()):
+                    return
+
+            bottom_left = Image.open(children[0].get_tile_path())
+            top_left = Image.open(children[1].get_tile_path())
+            bottom_right = Image.open(children[2].get_tile_path())
+            top_right = Image.open(children[3].get_tile_path())
+
+            # Concatenate the images horizontally (side by side)
+            concatenated_tile = Image.new('RGBA', (512, 512))
+            concatenated_tile.paste(top_left, (0, 0))
+            concatenated_tile.paste(top_right, (256, 0))
+            concatenated_tile.paste(bottom_right, (256, 256))
+            concatenated_tile.paste(bottom_left, (0, 256))
+
+            # Resize the horizontally concatenated image to 256x256
+            resampling = _get_image_resize_resampling(entry.resampling)
+            resized_image = concatenated_tile.resize((256, 256), resampling)
+            concatenated_tile.close()
+
+            tile_file_path = entry.get_tile_path()
+            os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
+            # Save or display the final result
+            resized_image.save(tile_file_path)
+            resized_image.close()
+
+        def _create_tile_hierarchy(entry: TileCreateRequest, max_create: int) -> int:
+            if max_create <= 0:
+                return 0
+
+            tile_file_path = entry.get_tile_path()
+            if os.path.exists(tile_file_path):
+                return 0
+
+            if entry.z >= entry.startCreateTileZoom:
+                print("Creating Tile by origin file: %d : %d : %d" % (entry.z, entry.x, entry.y))
+                self._create_tile_by_origin_file(entry)
+                return 1
+
+            created_tiles = 0
+            children: List[TileCreateRequest] = entry.get_children()
+            for child in children:
+                if max_create - created_tiles > 0:
+                    print("Before: %d - %d = %d" % (max_create, created_tiles, max_create - created_tiles))
+                    how_created = _create_tile_hierarchy(child, max_create - created_tiles)
+                    print("How Created: %d" % how_created)
+                    created_tiles += how_created
+
+            _create_tile_if_child_exists(entry)
+
+            return created_tiles
+
+        _create_tile_hierarchy(tile_request, 4)
+
+    def _create_tile_by_origin_file(self, tile_request: TileCreateRequest):
         gdal_2_tiles: GDAL2Tiles = self._get_gdal_2_tile_entry(tile_request)
 
         tile_job_info = self._get_tile_job_info(gdal_2_tiles)
 
         tile_detail = self._get_tile_detail(gdal_2_tiles, tile_request)
-        self._create_tile(tile_job_info, tile_detail, tile_request)
-
-    def _create_tile(self, tile_job_info: TileJobInfo, tile_detail: TileDetail, tile_request: TileCreateRequest):
 
         tile_file_path = tile_request.get_tile_path()
+        os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
 
         data_bands_count = tile_job_info.nb_data_bands
         tile_size = tile_job_info.tile_size
@@ -51,6 +145,7 @@ class TileCreator:
         data = alpha = None
 
         if tile_detail.rxsize != 0 and tile_detail.rysize != 0 and tile_detail.wxsize != 0 and tile_detail.wysize != 0:
+            print(tile_detail.wysize)
             alpha = alpha_band.ReadRaster(tile_detail.rx, tile_detail.ry, tile_detail.rxsize, tile_detail.rysize,
                                           tile_detail.wxsize, tile_detail.wysize)
 

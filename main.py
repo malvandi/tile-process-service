@@ -3,7 +3,7 @@ import json
 from pika import BasicProperties
 from pika.adapters.blocking_connection import BlockingChannel
 
-from model.rabbit_message import TileCreateRequest, LayerInfoRequest, LayerInfoResponse
+from model.rabbit_message import TileCreateRequest, LayerInfoRequest, LayerInfoResponse, FileTileCreate
 from rabbit import Rabbit
 from util.raster_info import fetch_info
 from util.tile_creator import TileCreator
@@ -58,21 +58,21 @@ def init_raster_info_requests():
 
 def run_test():
     tile = TileCreateRequest()
-    # tile.z = 15
-    # tile.x = 21067
-    # tile.y = 12903
+    tile.z = 19
+    tile.x = 337169
+    tile.y = 317825
+    tile.startPoint = 'BOTTOM_LEFT'
+    tile.directory = '{base_directory}'
+    east_file = FileTileCreate()
+    east_file.name = 'east.tif'
+    east_file.startCreateTileZoom = 18
+    tile.files.append(east_file)
 
-    tile.z = 15
-    tile.x = 21067
-    tile.y = 12900
-    # tile.z = 16
-    # tile.x = 42134
-    # tile.y = 25800
-    tile.startCreateTileZoom = 17
-    tile.resampling = 'max'
-    tile.file = "tehran-now.tif"
-    tile.directory = "{base_directory}"
-    tile.startPoint = 'TOP_LEFT'
+    west_file = FileTileCreate()
+    west_file.name = 'west.tif'
+    west_file.startCreateTileZoom = 18
+    tile.files.append(west_file)
+
     rabbit.channel.basic_publish(configs.exchange, 'TILE_CREATE_REQUEST', tile.model_dump_json())
 
     tile.y = 155118
@@ -84,7 +84,7 @@ def run_test():
     # rabbit.channel.basic_publish(configs.exchange, 'TILE_CREATE_REQUEST', tile.model_dump_json())
 
     info_request = LayerInfoRequest(**{})
-    info_request.file = tile.file
+    # info_request.file = tile.file
     info_request.directory = tile.directory
     # info: LayerInfoResponse = fetch_info(info_request)
     # print(info.model_dump_json())

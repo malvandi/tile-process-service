@@ -8,11 +8,7 @@ upload_base_directory = load_upload_base_directory()
 
 
 class RabbitMessage(BaseModel):
-    file: str = 'origin.tif'
     directory: str = ''
-
-    def get_raster_file_path(self) -> str:
-        return self.get_directory_path() + "/" + self.file
 
     def get_directory_path(self) -> str:
         converted = (self.directory.replace('{base_directory}', base_directory)
@@ -24,14 +20,22 @@ class RabbitMessage(BaseModel):
         return converted
 
 
+class FileTileCreate(BaseModel):
+    name: str = ''
+    startCreateTileZoom: int = 0
+    resampling: str = 'near'
+
+
 class TileCreateRequest(RabbitMessage):
     z: int = 0
     x: int = 0
     y: int = 0
-    startCreateTileZoom: int = 0
-    resampling: str = 'near'
+    files: List[FileTileCreate] = []
     startPoint: str = 'TOP_LEFT'
     pattern: str = 'morteza/{z}/{x}/{y}.png'
+
+    def get_raster_file_path(self, file: FileTileCreate) -> str:
+        return self.get_directory_path() + "/" + file.name
 
     """
     Get y index start from bottom
@@ -51,6 +55,12 @@ class TileCreateRequest(RabbitMessage):
             .replace('{x}', str(self.x)) \
             .replace('{y}', str(self.y))
 
+    def get_file_tile_path(self, file: FileTileCreate):
+        return self.get_tile_path() + '_' + file.name + '.temp'
+
+    def get_file_temp_directory(self, file: FileTileCreate) -> str:
+        return self.get_directory_path()
+
     def get_children(self) -> List['TileCreateRequest']:
         returned = []
         for i in range(2):
@@ -60,11 +70,9 @@ class TileCreateRequest(RabbitMessage):
                 child.x = self.x * 2 + i
                 child.y = self.y * 2 + j
 
-                child.startCreateTileZoom = self.startCreateTileZoom
-                child.resampling = self.resampling
+                child.files += self.files
                 child.startPoint = self.startPoint
                 child.pattern = self.pattern
-                child.file = self.file
                 child.directory = self.directory
 
                 returned.append(child)
@@ -74,17 +82,23 @@ class TileCreateRequest(RabbitMessage):
 
 class LayerInfoRequest(RabbitMessage):
     id: str = ''
+    file: str = 'origin.tif'
+
+    def get_raster_file_path(self) -> str:
+        return self.get_directory_path() + "/" + self.file
 
 
 class LayerInfoResponse(BaseModel):
     id: str = ''
+    file: str = ''
     minZoom: int = 4
     maxZoom: int = 21
     bbox: list = list()
 
-    def __init__(self, response_id: str, min_zoom: int, max_zoom: int, bbox: list):
+    def __init__(self, response_id: str, file: str, min_zoom: int, max_zoom: int, bbox: list):
         super().__init__()
         self.id = response_id
+        self.file = file
         self.minZoom = min_zoom
         self.maxZoom = max_zoom
         self.bbox = bbox

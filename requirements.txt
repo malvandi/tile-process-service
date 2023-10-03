@@ -7,3 +7,5 @@ numpy~=1.26.0
 python-dotenv~=1.0.0
 pydantic~=2.4.2
 pyproj~=3.6.0
+# It must be in install gdal os version
+gdal~=3.6.2

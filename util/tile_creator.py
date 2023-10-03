@@ -9,7 +9,7 @@ import osgeo.gdal_array as gdalarray
 from osgeo_utils.gdal2tiles import numpy_available, TileDetail
 
 from model.gdal_2_tiles_options import GDAL2TilesOptions
-from model.rabbit_message import TileCreateRequest
+from model.rabbit_message import TileCreateRequest, FileTileCreate
 from model.tile_creator_instance import TileCreatorInstance
 from typing import List, Literal, Optional
 
@@ -29,47 +29,39 @@ class TileCreator:
         if os.path.exists(tile_file_path):
             return
 
-        if self._is_empty_tile(tile_request):
+        tile_request.files[:] = [file for file in tile_request.files if
+                                 not self._is_empty_file_tile(tile_request, file)]
+        for file in tile_request.files:
+            self._create_tile_file(tile_request, file)
+
+        self._create_tile_if_file_tiles_exist(tile_request)
+
+    def _create_tile_file(self, tile_request: TileCreateRequest, file: FileTileCreate):
+
+        tile_path = tile_request.get_tile_path()
+        tile_file_path = tile_request.get_file_tile_path(file)
+        if os.path.exists(tile_path) or os.path.exists(tile_file_path):
+            return
+
+        if self._is_empty_file_tile(tile_request, file):
             os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
-            self._transparent_image.save(tile_file_path)
+            self._transparent_image.save(tile_file_path, format="png")
             return
 
-        if tile_request.startCreateTileZoom > tile_request.z:
-            self._create_tile_by_child(tile_request)
+        if file.startCreateTileZoom > tile_request.z:
+            self._create_file_tile_by_child(tile_request, file)
             return
 
-        self._create_tile_by_origin_file(tile_request)
+        self._create_tile_by_origin_file(tile_request, file)
 
-    def _create_tile_by_child(self, tile_request: TileCreateRequest):
-        def _get_image_resize_resampling(resampling: str) -> Literal[int]:
-            if resampling == 'nearest' or resampling == 'near':
-                return Image.NEAREST
-
-            if resampling == 'average' or resampling == 'bilinear':
-                return Image.BILINEAR
-
-            if resampling == 'cubic' or resampling == 'cubicspline':
-                return Image.BICUBIC
-
-            if resampling == 'lanczos':
-                return Image.LANCZOS
-
-            if resampling == 'antialias':
-                return Image.ANTIALIAS
-
-            if resampling == 'max':
-                return Image.MAXCOVERAGE
-
-            if resampling == 'med':
-                return Image.MEDIANCUT
-
-            return Image.NEAREST
+    def _create_file_tile_by_child(self, tile_request: TileCreateRequest, file: FileTileCreate):
 
         def _get_child_image_if_exists(child: TileCreateRequest) -> Optional[Image]:
-            if os.path.exists(child.get_tile_path()):
-                return Image.open(child.get_tile_path())
+            file_tile_path = child.get_file_tile_path(file)
+            if os.path.exists(file_tile_path):
+                return Image.open(file_tile_path)
 
-            if self._is_empty_tile(child):
+            if self._is_empty_file_tile(child, file):
                 return self._transparent_image
 
             return None
@@ -91,29 +83,30 @@ class TileCreator:
             concatenated_tile.paste(images[3], (256, 256))
 
             # Resize the horizontally concatenated image to 256x256
-            resampling = _get_image_resize_resampling(entry.resampling)
+            resampling = TileCreator._get_pillow_image_resize_resampling(file.resampling)
             resized_image = concatenated_tile.resize((256, 256), resampling)
             concatenated_tile.close()
 
-            tile_file_path = entry.get_tile_path()
+            tile_file_path = entry.get_file_tile_path(file)
             os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
-            # Save or display the final result
             resized_image.save(tile_file_path)
             resized_image.close()
+            self._create_tile_if_file_tiles_exist(tile_request)
 
         def _create_tile_hierarchy(entry: TileCreateRequest, max_create: int) -> int:
             if max_create <= 0:
                 return 0
 
-            tile_file_path = entry.get_tile_path()
-            if os.path.exists(tile_file_path):
+            tile_path = entry.get_tile_path()
+            file_tile_path = entry.get_file_tile_path(file)
+            if os.path.exists(tile_path) or os.path.exists(file_tile_path):
                 return 0
 
-            if self._is_empty_tile(entry):
+            if self._is_empty_file_tile(entry, file):
                 return 0
 
-            if entry.z >= entry.startCreateTileZoom:
-                self._create_tile_by_origin_file(entry)
+            if entry.z >= file.startCreateTileZoom:
+                self._create_tile_by_origin_file(entry, file)
                 return 1
 
             created_tiles = 0
@@ -129,9 +122,9 @@ class TileCreator:
 
         _create_tile_hierarchy(tile_request, 4)
 
-    def _create_tile_by_origin_file(self, tile_request: TileCreateRequest):
-        tile_file_path = tile_request.get_tile_path()
-        tile_creator = self._get_tile_creator_instance(tile_request)
+    def _create_tile_by_origin_file(self, tile_request: TileCreateRequest, file_tile: FileTileCreate):
+        tile_file_path = tile_request.get_file_tile_path(file_tile)
+        tile_creator = self._get_file_tile_creator_instance(tile_request, file_tile)
 
         tile_job_info = tile_creator.tile_job_info
 
@@ -204,7 +197,104 @@ class TileCreator:
 
         del tile_dataset
 
-    def _get_tile_creator_instance(self, tile_request: TileCreateRequest) -> TileCreatorInstance:
+    def _old_create_tile_by_origin_file(self, tile_request: TileCreateRequest):
+        tile_file_path = tile_request.get_tile_path()
+        tile_creator = self._old_get_tile_creator_instance(tile_request)
+
+        tile_job_info = tile_creator.tile_job_info
+
+        os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
+
+        tile_detail = self._get_tile_detail(tile_creator.gdal2tiles, tile_request)
+
+        data_bands_count = tile_job_info.nb_data_bands
+        tile_size = tile_job_info.tile_size
+        options = tile_job_info.options
+
+        tile_bands = data_bands_count + 1
+        ds = gdal.Open(tile_job_info.src_file, gdal.GA_ReadOnly)
+
+        mem_drv = gdal.GetDriverByName("MEM")
+        out_drv = gdal.GetDriverByName(tile_job_info.tile_driver)
+        alpha_band = ds.GetRasterBand(1).GetMaskBand()
+
+        # Tile dataset in memory
+        tile_dataset = mem_drv.Create("", tile_size, tile_size, tile_bands)
+
+        data = alpha = None
+
+        if tile_detail.rxsize != 0 and tile_detail.rysize != 0 and tile_detail.wxsize != 0 and tile_detail.wysize != 0:
+            alpha = alpha_band.ReadRaster(tile_detail.rx, tile_detail.ry, tile_detail.rxsize, tile_detail.rysize,
+                                          tile_detail.wxsize, tile_detail.wysize)
+
+            data = ds.ReadRaster(
+                tile_detail.rx, tile_detail.ry, tile_detail.rxsize, tile_detail.rysize,
+                tile_detail.wxsize, tile_detail.wysize, band_list=list(range(1, data_bands_count + 1)),
+            )
+
+        if data:
+            if tile_size == tile_detail.querysize:
+                # Use the ReadRaster result directly in tiles ('nearest neighbour' query)
+                tile_dataset.WriteRaster(
+                    tile_detail.wx, tile_detail.wy, tile_detail.wxsize, tile_detail.wysize, data,
+                    band_list=list(range(1, data_bands_count + 1)),
+                )
+                tile_dataset.WriteRaster(tile_detail.wx, tile_detail.wy, tile_detail.wxsize, tile_detail.wysize, alpha,
+                                         band_list=[tile_bands])
+
+                # Note: For source drivers based on WaveLet compression (JPEG2000, ECW,
+                # MrSID) the ReadRaster function returns high-quality raster (not ugly
+                # nearest neighbour)
+                # TODO: Use directly 'near' for WaveLet files
+            else:
+                # Big ReadRaster query in memory scaled to the tile_size - all but 'near'
+                # algo
+                ds_query = mem_drv.Create("", tile_detail.querysize, tile_detail.querysize, tile_bands)
+                # TODO: fill the null value in case a tile without alpha is produced (now
+                # only png tiles are supported)
+                ds_query.WriteRaster(
+                    tile_detail.wx, tile_detail.wy, tile_detail.wxsize, tile_detail.wysize, data,
+                    band_list=list(range(1, data_bands_count + 1)),
+                )
+                ds_query.WriteRaster(
+                    tile_detail.wx, tile_detail.wy, tile_detail.wxsize, tile_detail.wysize, alpha,
+                    band_list=[tile_bands]
+                )
+
+                self._scale_query_to_tile(ds_query, tile_dataset, options, tile_file_path)
+                del ds_query
+
+        del data
+
+        if options.resampling != "antialias":
+            # Write a copy of tile to png/jpg
+            out_drv.CreateCopy(tile_file_path, tile_dataset, strict=0, options=[])
+
+        del tile_dataset
+
+    def _get_file_tile_creator_instance(self, tile_request: TileCreateRequest,
+                                        file: FileTileCreate) -> TileCreatorInstance:
+        raster_file_path = tile_request.get_raster_file_path(file)
+        entry = self._tile_creators.get(raster_file_path)
+        if entry:
+            return entry
+
+        options = GDAL2TilesOptions()
+        options.zoom = [1, 26]
+        options.resampling = file.resampling
+
+        file_temp_directory = tile_request.get_file_temp_directory(file)
+        gdal_to_tiles = GDAL2Tiles(raster_file_path, file_temp_directory, options)
+        gdal_to_tiles.open_input()
+        gdal_to_tiles.generate_metadata()
+
+        tile_job_info = self._get_tile_job_info(gdal_to_tiles)
+
+        instance = TileCreatorInstance(raster_file_path, gdal_to_tiles, tile_job_info)
+        self._tile_creators[raster_file_path] = instance
+        return instance
+
+    def _old_get_tile_creator_instance(self, tile_request: TileCreateRequest) -> TileCreatorInstance:
         key = tile_request.get_raster_file_path() + '_' + tile_request.get_directory_path()
         entry = self._tile_creators.get(key)
         if entry:
@@ -225,7 +315,14 @@ class TileCreator:
         return instance
 
     def _is_empty_tile(self, tile_request: TileCreateRequest) -> bool:
-        creator: TileCreatorInstance = self._get_tile_creator_instance(tile_request)
+        creator: TileCreatorInstance = self._old_get_tile_creator_instance(tile_request)
+        zoom_info = creator.tile_job_info.tminmax[tile_request.z]
+        tms = tile_request.get_tms_position()
+
+        return not (zoom_info[0] <= tms[1] <= zoom_info[2] and zoom_info[1] <= tms[2] <= zoom_info[3])
+
+    def _is_empty_file_tile(self, tile_request: TileCreateRequest, file: FileTileCreate) -> bool:
+        creator: TileCreatorInstance = self._get_file_tile_creator_instance(tile_request, file)
         zoom_info = creator.tile_job_info.tminmax[tile_request.z]
         tms = tile_request.get_tms_position()
 
@@ -387,3 +484,52 @@ class TileCreator:
                 return False
 
         return True
+
+    @staticmethod
+    def _get_pillow_image_resize_resampling(resampling: str) -> Literal[int]:
+        if resampling == 'nearest' or resampling == 'near':
+            return Image.NEAREST
+
+        if resampling == 'average' or resampling == 'bilinear':
+            return Image.BILINEAR
+
+        if resampling == 'cubic' or resampling == 'cubicspline':
+            return Image.BICUBIC
+
+        if resampling == 'lanczos':
+            return Image.LANCZOS
+
+        if resampling == 'antialias':
+            return Image.ANTIALIAS
+
+        if resampling == 'max':
+            return Image.MAXCOVERAGE
+
+        if resampling == 'med':
+            return Image.MEDIANCUT
+
+        return Image.NEAREST
+
+    @staticmethod
+    def _create_tile_if_file_tiles_exist(tile_request: TileCreateRequest):
+        images: list[Image] = []
+        for file in tile_request.files:
+            tile_file_path = tile_request.get_file_tile_path(file)
+            if not os.path.exists(tile_file_path):
+                return
+            print(file.name)
+            images.append(Image.open(tile_file_path))
+
+        tile = Image.new('RGBA', (256, 256), (255, 255, 255, 0))
+        for image in images:
+            tile.paste(image, (0, 0), image)
+            # tile = Image.blend(tile, image, 1)
+
+        tile_path = tile_request.get_tile_path()
+        os.makedirs(os.path.dirname(tile_path), exist_ok=True)
+        tile.save(tile_path, "png")
+        tile.close()
+        for file in tile_request.files:
+            tile_file_path = tile_request.get_file_tile_path(file)
+            if os.path.exists(tile_file_path):
+                os.remove(tile_file_path)

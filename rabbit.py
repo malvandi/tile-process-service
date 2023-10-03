@@ -14,8 +14,10 @@ class Rabbit:
     def __init__(self, configs: RabbitConfig):
         self.configs = configs
         credentials = pika.credentials.PlainCredentials(self.configs.username, self.configs.password)
-        rabbit_parameters = pika.ConnectionParameters(self.configs.host, self.configs.port, credentials=credentials)
+        rabbit_parameters = pika.ConnectionParameters(self.configs.host, self.configs.port, credentials=credentials,
+                                                      connection_attempts=self.configs.connection_attempts,
+                                                      retry_delay=self.configs.retry_delay,
+                                                      socket_timeout=self.configs.socket_timeout)
         self.connection = pika.BlockingConnection(rabbit_parameters)
         self.channel = self.connection.channel()
         self.channel.exchange_declare(configs.exchange, 'direct', durable=True)
-

@@ -5,3 +5,6 @@ class RabbitConfig:
     password: str = 'guest'
     exchange: str = 'mf-exchange-python'
 
+    connection_attempts: int = 100
+    retry_delay: int = 2  # In seconds
+    socket_timeout: int = 10  # In seconds

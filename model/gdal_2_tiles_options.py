@@ -15,3 +15,4 @@ class GDAL2TilesOptions:
     title = ""
     quiet = False
     exclude_transparent = True
+    url: str = ''

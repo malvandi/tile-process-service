@@ -40,4 +40,4 @@ def fetch_info(request: LayerInfoRequest) -> LayerInfoResponse:
             max_zoom = zoom
             break
 
-    return LayerInfoResponse(request.id, min_zoom, max_zoom, list(mercator_bounding_box))
+    return LayerInfoResponse(request.id, request.file, min_zoom, max_zoom, list(mercator_bounding_box))

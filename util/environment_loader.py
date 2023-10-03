@@ -13,6 +13,9 @@ def load_rabbit_config() -> RabbitConfig:
     config.username = str(os.environ.get('RABBIT_USERNAME'))
     config.password = str(os.environ.get('RABBIT_PASSWORD'))
     config.exchange = str(os.environ.get('RABBIT_EXCHANGE'))
+    config.connection_attempts = int(os.environ.get('RABBIT_CONNECTION_ATTEMPTS'))
+    config.retry_delay = int(os.environ.get('RABBIT_RETRY_DELAY'))
+    config.socket_timeout = int(os.environ.get('RABBIT_SOCKET_TIMEOUT'))
 
     return config
 

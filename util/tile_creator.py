@@ -1,4 +1,5 @@
 import os
+import random
 
 import numpy
 from PIL import Image
@@ -84,10 +85,10 @@ class TileCreator:
                 images.append(image)
 
             concatenated_tile = Image.new('RGBA', (512, 512))
+            concatenated_tile.paste(images[0], (0, 256))
             concatenated_tile.paste(images[1], (0, 0))
             concatenated_tile.paste(images[2], (256, 0))
             concatenated_tile.paste(images[3], (256, 256))
-            concatenated_tile.paste(images[0], (0, 256))
 
             # Resize the horizontally concatenated image to 256x256
             resampling = _get_image_resize_resampling(entry.resampling)
@@ -117,6 +118,7 @@ class TileCreator:
 
             created_tiles = 0
             children: List[TileCreateRequest] = entry.get_children()
+            random.shuffle(children)
             for child in children:
                 if max_create - created_tiles > 0:
                     created_tiles += _create_tile_hierarchy(child, max_create - created_tiles)

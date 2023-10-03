@@ -2,7 +2,6 @@ import os
 
 import numpy
 from PIL import Image
-from PIL.Image import Resampling
 from gdal2tiles import GDAL2Tiles, TileJobInfo
 from osgeo import gdal
 import osgeo.gdal_array as gdalarray
@@ -10,12 +9,14 @@ from osgeo_utils.gdal2tiles import numpy_available, TileDetail
 
 from model.gdal_2_tiles_options import GDAL2TilesOptions
 from model.rabbit_message import TileCreateRequest
-from typing import List, Literal
+from model.tile_creator_instance import TileCreatorInstance
+from typing import List, Literal, Optional
 
 
 class TileCreator:
     _gdal2tilesEntries = dict()
-    transparent_image = Image.new('RGBA', (256, 256), (255, 255, 255, 0))
+    _tile_creators = dict()
+    _transparent_image = Image.new('RGBA', (256, 256), (255, 255, 255, 0))
 
     def create_tile(self, tile_request: TileCreateRequest):
 
@@ -24,8 +25,12 @@ class TileCreator:
         # if os.path.exists(tile_file_path):  # TODO(remove)
         #     os.remove(tile_request.get_tile_path())
 
-        # os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
         if os.path.exists(tile_file_path):
+            return
+
+        if self._is_empty_tile(tile_request):
+            os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
+            self._transparent_image.save(tile_file_path)
             return
 
         if tile_request.startCreateTileZoom > tile_request.z:
@@ -39,14 +44,11 @@ class TileCreator:
             if resampling == 'nearest' or resampling == 'near':
                 return Image.NEAREST
 
-            if resampling == 'average':
-                return Image.LINEAR
-
-            if resampling == 'bilinear':
+            if resampling == 'average' or resampling == 'bilinear':
                 return Image.BILINEAR
 
             if resampling == 'cubic' or resampling == 'cubicspline':
-                return Image.CUBIC
+                return Image.BICUBIC
 
             if resampling == 'lanczos':
                 return Image.LANCZOS
@@ -62,23 +64,30 @@ class TileCreator:
 
             return Image.NEAREST
 
+        def _get_child_image_if_exists(child: TileCreateRequest) -> Optional[Image]:
+            if os.path.exists(child.get_tile_path()):
+                return Image.open(child.get_tile_path())
+
+            if self._is_empty_tile(child):
+                return self._transparent_image
+
+            return None
+
         def _create_tile_if_child_exists(entry: TileCreateRequest):
             children: List[TileCreateRequest] = entry.get_children()
+            images = []
             for child in children:
-                if not os.path.exists(child.get_tile_path()):
+                image = _get_child_image_if_exists(child)
+                if image is None:
                     return
 
-            bottom_left = Image.open(children[0].get_tile_path())
-            top_left = Image.open(children[1].get_tile_path())
-            bottom_right = Image.open(children[2].get_tile_path())
-            top_right = Image.open(children[3].get_tile_path())
+                images.append(image)
 
-            # Concatenate the images horizontally (side by side)
             concatenated_tile = Image.new('RGBA', (512, 512))
-            concatenated_tile.paste(top_left, (0, 0))
-            concatenated_tile.paste(top_right, (256, 0))
-            concatenated_tile.paste(bottom_right, (256, 256))
-            concatenated_tile.paste(bottom_left, (0, 256))
+            concatenated_tile.paste(images[1], (0, 0))
+            concatenated_tile.paste(images[2], (256, 0))
+            concatenated_tile.paste(images[3], (256, 256))
+            concatenated_tile.paste(images[0], (0, 256))
 
             # Resize the horizontally concatenated image to 256x256
             resampling = _get_image_resize_resampling(entry.resampling)
@@ -99,6 +108,9 @@ class TileCreator:
             if os.path.exists(tile_file_path):
                 return 0
 
+            if self._is_empty_tile(entry):
+                return 0
+
             if entry.z >= entry.startCreateTileZoom:
                 self._create_tile_by_origin_file(entry)
                 return 1
@@ -117,18 +129,13 @@ class TileCreator:
 
     def _create_tile_by_origin_file(self, tile_request: TileCreateRequest):
         tile_file_path = tile_request.get_tile_path()
+        tile_creator = self._get_tile_creator_instance(tile_request)
 
-        gdal_2_tiles: GDAL2Tiles = self._get_gdal_2_tile_entry(tile_request)
-
-        tile_job_info = self._get_tile_job_info(gdal_2_tiles)
+        tile_job_info = tile_creator.tile_job_info
 
         os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
 
-        if self._is_empty_tile(tile_job_info, tile_request):
-            self.transparent_image.save(tile_file_path)
-            return
-
-        tile_detail = self._get_tile_detail(gdal_2_tiles, tile_request)
+        tile_detail = self._get_tile_detail(tile_creator.gdal2tiles, tile_request)
 
         data_bands_count = tile_job_info.nb_data_bands
         tile_size = tile_job_info.tile_size
@@ -195,20 +202,32 @@ class TileCreator:
 
         del tile_dataset
 
-    def _get_gdal_2_tile_entry(self, tile_request: TileCreateRequest) -> GDAL2Tiles:
+    def _get_tile_creator_instance(self, tile_request: TileCreateRequest) -> TileCreatorInstance:
         key = tile_request.get_raster_file_path() + '_' + tile_request.get_directory_path()
-
-        entry = self._gdal2tilesEntries.get(key)
+        entry = self._tile_creators.get(key)
         if entry:
             return entry
 
         options = GDAL2TilesOptions()
-        options.zoom = [tile_request.z, tile_request.z]
+        options.zoom = [1, 26]
+        options.resampling = tile_request.resampling
+
         gdal_to_tiles = GDAL2Tiles(tile_request.get_raster_file_path(), tile_request.get_directory_path(), options)
         gdal_to_tiles.open_input()
         gdal_to_tiles.generate_metadata()
-        self._gdal2tilesEntries[key] = gdal_to_tiles
-        return gdal_to_tiles
+
+        tile_job_info = self._get_tile_job_info(gdal_to_tiles)
+
+        instance = TileCreatorInstance(key, gdal_to_tiles, tile_job_info)
+        self._tile_creators[key] = instance
+        return instance
+
+    def _is_empty_tile(self, tile_request: TileCreateRequest) -> bool:
+        creator: TileCreatorInstance = self._get_tile_creator_instance(tile_request)
+        zoom_info = creator.tile_job_info.tminmax[tile_request.z]
+        tms = tile_request.get_tms_position()
+
+        return not (zoom_info[0] <= tms[1] <= zoom_info[2] and zoom_info[1] <= tms[2] <= zoom_info[3])
 
     @staticmethod
     def _get_tile_job_info(gdal_2_tiles: GDAL2Tiles) -> TileJobInfo:
@@ -356,7 +375,7 @@ class TileCreator:
         return 0
 
     @staticmethod
-    def _is_empty_tile(tile_info: TileJobInfo, tile_request: TileCreateRequest) -> bool:
+    def _is_empty_tile_old(tile_info: TileJobInfo, tile_request: TileCreateRequest) -> bool:
         zoom_info = tile_info.tminmax[tile_request.z]
 
         tms = tile_request.get_tms_position()
@@ -366,4 +385,3 @@ class TileCreator:
                 return False
 
         return True
-

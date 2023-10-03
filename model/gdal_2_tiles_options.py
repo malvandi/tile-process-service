@@ -3,8 +3,8 @@ class GDAL2TilesOptions:
     tile_size: int = 256
 
     # average, near, bilinear, cubic, cubicspline, lanczos, mode, max, min, med, q1, q3
-    resampling = 'near'
-    zoom = [18, 18]
+    resampling = 'average'
+    zoom = [1, 26]
     kml = False
     verbose = False
     srcnodata = False

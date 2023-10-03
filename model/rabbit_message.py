@@ -60,7 +60,6 @@ class TileCreateRequest(RabbitMessage):
                 child.x = self.x * 2 + i
                 child.y = self.y * 2 + j
 
-                print("Creating tile: %d : %d : %d => %d : %d : %d" % (self.z, self.x, self.y, child.z, child.x, child.y))
                 child.startCreateTileZoom = self.startCreateTileZoom
                 child.resampling = self.resampling
                 child.startPoint = self.startPoint

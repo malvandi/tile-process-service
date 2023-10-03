@@ -68,8 +68,8 @@ def run_test():
     # tile.z = 16
     # tile.x = 42134
     # tile.y = 25800
-    tile.startCreateTileZoom = 16
-    tile.resampling = 'bilinear'
+    tile.startCreateTileZoom = 17
+    tile.resampling = 'max'
     tile.file = "tehran-now.tif"
     tile.directory = "{base_directory}"
     tile.startPoint = 'TOP_LEFT'
@@ -94,6 +94,6 @@ init_raster_info_requests()
 init_tile_create_requests()
 
 # Test
-# run_test()
+run_test()
 
 rabbit.channel.start_consuming()

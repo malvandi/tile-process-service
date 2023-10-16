@@ -13,6 +13,7 @@ class Rabbit:
 
     def __init__(self, configs: RabbitConfig):
         self.configs = configs
+        print('Connecting to RabbitMQ ...', flush=True)
         credentials = pika.credentials.PlainCredentials(self.configs.username, self.configs.password)
         rabbit_parameters = pika.ConnectionParameters(self.configs.host, self.configs.port, credentials=credentials,
                                                       connection_attempts=self.configs.connection_attempts,

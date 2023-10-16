@@ -1,3 +1,5 @@
+import os
+
 from pydantic import BaseModel
 from typing import List
 
@@ -22,7 +24,6 @@ class RabbitMessage(BaseModel):
 
 class FileTileCreate(BaseModel):
     name: str = ''
-    startCreateTileZoom: int = 0
     resampling: str = 'near'
 
 
@@ -30,6 +31,7 @@ class TileCreateRequest(RabbitMessage):
     z: int = 0
     x: int = 0
     y: int = 0
+    startCreateTileZoom: int = 0
     files: List[FileTileCreate] = []
     startPoint: str = 'TOP_LEFT'
     pattern: str = 'morteza/{z}/{x}/{y}.png'
@@ -79,6 +81,13 @@ class TileCreateRequest(RabbitMessage):
 
         return returned
 
+    def exist(self) -> bool:
+        tile_path = self.get_tile_path()
+        return os.path.exists(tile_path)
+
+    def exist_file_tile(self, file: FileTileCreate) -> bool:
+        file_tile_path = self.get_file_tile_path(file)
+        return os.path.exists(file_tile_path)
 
 class LayerInfoRequest(RabbitMessage):
     id: str = ''

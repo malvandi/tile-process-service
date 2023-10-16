@@ -75,14 +75,15 @@ class Runner:
         tile.directory = '{base_directory}'
         east_file = FileTileCreate()
         east_file.name = 'east.tif'
-        east_file.startCreateTileZoom = 19
+        # east_file.startCreateTileZoom = 19
         tile.files.append(east_file)
 
         west_file = FileTileCreate()
         west_file.name = 'west.tif'
-        west_file.startCreateTileZoom = 19
+        # west_file.startCreateTileZoom = 19
         tile.files.append(west_file)
 
+        tile.startCreateTileZoom = 19
         self._rabbit.channel.basic_publish(self._configs.exchange, 'TILE_CREATE_REQUEST', tile.model_dump_json())
 
         tile.y = tile.y + 1

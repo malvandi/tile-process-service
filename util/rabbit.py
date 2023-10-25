@@ -1,3 +1,5 @@
+import logging
+
 from dotenv import load_dotenv
 import pika
 from pika import BlockingConnection
@@ -10,10 +12,12 @@ class Rabbit:
     configs: RabbitConfig
     connection: BlockingConnection
     channel: BlockingChannel
+    _logger: logging.Logger
 
     def __init__(self, configs: RabbitConfig):
         self.configs = configs
-        print('Connecting to RabbitMQ ...', flush=True)
+        self._logger = logging.getLogger(__name__)
+        self._logger.info('Connecting to RabbitMQ ...')
         credentials = pika.credentials.PlainCredentials(self.configs.username, self.configs.password)
         rabbit_parameters = pika.ConnectionParameters(self.configs.host, self.configs.port, credentials=credentials,
                                                       connection_attempts=self.configs.connection_attempts,

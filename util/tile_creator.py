@@ -1,8 +1,10 @@
+import logging
 import os
 import random
 
 import numpy
-from PIL import Image
+from PIL.Image import Image as PngImage
+from PIL import Image as ImageUtil
 from gdal2tiles import GDAL2Tiles, TileJobInfo
 from osgeo import gdal
 import osgeo.gdal_array as gdalarray
@@ -11,14 +13,22 @@ from osgeo_utils.gdal2tiles import numpy_available, TileDetail
 from model.gdal_2_tiles_options import GDAL2TilesOptions
 from model.rabbit_message import TileCreateRequest, FileTileCreate
 from model.tile_creator_instance import TileCreatorInstance
-from typing import List, Literal
+from typing import List, Literal, Any
+
+from util.environment_loader import load_create_tile_count_per_request
 
 
 class TileCreator:
-    _gdal2tilesEntries = dict()
-    _tile_creators = dict()
+    _gdal2tilesEntries: dict
+    _tile_creators: dict
+    _logger: logging.Logger
+    _create_tile_count_per_request: int = 4
 
-    # _transparent_image = Image.new('RGBA', (256, 256), (255, 255, 255, 0))
+    def __init__(self):
+        self._logger = logging.getLogger(__name__)
+        self._gdal2tilesEntries = dict()
+        self._tile_creators = dict()
+        self._create_tile_count_per_request = load_create_tile_count_per_request()
 
     def create_tile(self, tile_request: TileCreateRequest):
 
@@ -34,33 +44,26 @@ class TileCreator:
                                  not self._is_empty_file_tile(tile_request, file)]
 
         if tile_request.z >= tile_request.startCreateTileZoom:
-            self._new_create_tile_by_origin_file(tile_request, 4)
+            self._create_tile_by_origin_file(tile_request, self._create_tile_count_per_request)
         else:
-            self._create_tile_by_child(tile_request, 4)
-        # for file in tile_request.files:
-        #     self._create_tile_file(tile_request, file)
-
-        # self._create_tile_if_file_tiles_exist(tile_request)
+            self._create_tile_by_child(tile_request, self._create_tile_count_per_request)
 
     def _create_tile_by_child(self, tile_request: TileCreateRequest, max_create_tile: int) -> int:
         if tile_request.exist():
-            return 0
-
-        if max_create_tile <= 0:
             return 0
 
         created_tiles = 0
         children = tile_request.get_children()
         for child in children:
             if tile_request.z + 1 >= tile_request.startCreateTileZoom:
-                created_tiles += self._new_create_tile_by_origin_file(child, max_create_tile - created_tiles)
+                created_tiles += self._create_tile_by_origin_file(child, max_create_tile - created_tiles)
             else:
                 created_tiles += self._create_tile_by_child(child, max_create_tile - created_tiles)
 
-        self._create_tile_if_file_tiles_exist(tile_request)
+        self._create_tile_if_child_exists(tile_request)
         return created_tiles
 
-    def _new_create_tile_by_origin_file(self, tile_request: TileCreateRequest, max_create_tile: int) -> int:
+    def _create_tile_by_origin_file(self, tile_request: TileCreateRequest, max_create_tile: int) -> int:
         if tile_request.exist():
             return 0
 
@@ -72,13 +75,14 @@ class TileCreator:
             if self._is_empty_file_tile(tile_request, file):
                 continue
 
-            if created_tiles > max_create_tile:
+            if created_tiles >= max_create_tile:
                 return created_tiles
 
             self._create_file_tile_by_origin_file(tile_request, file)
             created_tiles += 1
 
         self._create_tile_if_file_tiles_exist(tile_request)
+
         return created_tiles
 
     def _create_tile_file(self, tile_request: TileCreateRequest, file: FileTileCreate):
@@ -137,43 +141,59 @@ class TileCreator:
 
             images.append(image)
 
-        concatenated_tile = Image.new('RGBA', (512, 512))
-        if tile_request.startPoint == 'TOP_LEFT' or tile_request.startPoint == 'TOP_RIGHT':
-            concatenated_tile.paste(images[0], (0, 0))
-            concatenated_tile.paste(images[1], (0, 256))
-            concatenated_tile.paste(images[2], (256, 0))
-            concatenated_tile.paste(images[3], (256, 256))
-        else:
-            concatenated_tile.paste(images[0], (0, 256))
-            concatenated_tile.paste(images[1], (0, 0))
-            concatenated_tile.paste(images[2], (256, 256))
-            concatenated_tile.paste(images[3], (256, 0))
-
-        # Resize the horizontally concatenated image to 256x256
-        resampling = TileCreator._get_pillow_image_resize_resampling(file.resampling)
-        resized_image = concatenated_tile.resize((256, 256), resampling)
-        concatenated_tile.close()
+        file_tile_image = self._concat_images_and_resize(images, tile_request.startPoint, file.resampling)
 
         tile_file_path = tile_request.get_file_tile_path(file)
-        print('Generating file tile by childs: %s' % tile_file_path)
+        self._logger.debug('Creating file tile by children: %s' % tile_file_path)
         os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
-        resized_image.save(tile_file_path, format="png")
-        resized_image.close()
+        file_tile_image.save(tile_file_path, format="png")
+        file_tile_image.close()
         self._create_tile_if_file_tiles_exist(tile_request)
 
-    def _get_file_tile_image_if_exists(self, child: TileCreateRequest, file: FileTileCreate) -> Image:
+    def _create_tile_if_child_exists(self, tile_request: TileCreateRequest):
+        children: List[TileCreateRequest] = tile_request.get_children()
+        images = []
+        for child in children:
+            image = self._get_tile_image_if_exists(child)
+            if image is None:
+                return
+
+            images.append(image)
+
+        tile_image = self._concat_images_and_resize(images, tile_request.startPoint, tile_request.resampling)
+
+        tile_path = tile_request.get_tile_path()
+        self._logger.debug('Creating tile by children: %s' % tile_path)
+        os.makedirs(os.path.dirname(tile_path), exist_ok=True)
+        tile_image.save(tile_path, format="png")
+        tile_image.close()
+        # TODO(create parent if is allowed)
+
+    def _get_file_tile_image_if_exists(self, child: TileCreateRequest, file: FileTileCreate) -> PngImage | None:
         file_tile_path = child.get_file_tile_path(file)
         if os.path.exists(file_tile_path):
-            return Image.open(file_tile_path)
+            return ImageUtil.open(file_tile_path)
 
         if self._is_empty_file_tile(child, file):
             return self._get_transparent_tile()
 
         return None
 
+    def _get_tile_image_if_exists(self, tile_request: TileCreateRequest) -> PngImage | None:
+        if tile_request.exist():
+            return ImageUtil.open(tile_request.get_tile_path())
+
+        if self._is_empty_tile(tile_request):
+            return self._get_transparent_tile()
+
+        return None
+
     def _create_file_tile_by_origin_file(self, tile_request: TileCreateRequest, file_tile: FileTileCreate):
         tile_file_path = tile_request.get_file_tile_path(file_tile)
-        print('Creating tile by origin: %s' % tile_file_path, flush=True)
+        if self._is_empty_file_tile(tile_request, file_tile):
+            return
+
+        self._logger.debug('Creating file tile by origin: %s' % tile_file_path)
         tile_creator = self._get_file_tile_creator_instance(tile_request, file_tile)
 
         tile_job_info = tile_creator.tile_job_info
@@ -254,8 +274,8 @@ class TileCreator:
         if entry:
             return entry
 
-        print('Instance not found. exist instances are: ' + str(self._tile_creators.keys()))
-        print('Reading %s file for tiling ...' % file.name, flush=True)
+        self._logger.debug('Instance not found. exist instances are: ' + str(self._tile_creators.keys()))
+        self._logger.info('Reading %s file for tiling ...' % file.name)
         options = GDAL2TilesOptions()
         options.zoom = [1, 23]
         options.resampling = file.resampling
@@ -277,6 +297,37 @@ class TileCreator:
         tms = tile_request.get_tms_position()
 
         return not (zoom_info[0] <= tms[1] <= zoom_info[2] and zoom_info[1] <= tms[2] <= zoom_info[3])
+
+    def _is_empty_tile(self, tile_request: TileCreateRequest) -> bool:
+        for file in tile_request.files:
+            if not self._is_empty_file_tile(tile_request, file):
+                return False
+        return True
+
+    def _create_tile_if_file_tiles_exist(self, tile_request: TileCreateRequest):
+        images: list[PngImage] = []
+        for file in tile_request.files:
+            image = self._get_file_tile_image_if_exists(tile_request, file)
+            if image is None:
+                return
+            images.append(image)
+
+        self._logger.debug('Creating tile from file tiles: %s' % tile_request.get_tile_path())
+        tile = ImageUtil.new('RGBA', (256, 256), (255, 255, 255, 0))
+        for image in images:
+            tile.paste(image, (0, 0), image)
+            image.close()
+
+        tile_path = tile_request.get_tile_path()
+        os.makedirs(os.path.dirname(tile_path), exist_ok=True)
+        tile.save(tile_path, "png")
+        tile.close()
+        for file in tile_request.files:
+            tile_file_path = tile_request.get_file_tile_path(file)
+            if os.path.exists(tile_file_path):
+                os.remove(tile_file_path)
+
+        parent = tile_request.get_children()
 
     @staticmethod
     def _get_tile_job_info(gdal_2_tiles: GDAL2Tiles) -> TileJobInfo:
@@ -355,11 +406,11 @@ class TileCreator:
                 array[:, :, i] = gdalarray.BandReadAsArray(
                     dataset_query.GetRasterBand(i + 1), 0, 0, query_size, query_size
                 )
-            im = Image.fromarray(array, "RGBA")  # Always four bands
-            im1 = im.resize((tile_size, tile_size), Image.LANCZOS)
+            im = ImageUtil.fromarray(array, "RGBA")  # Always four bands
+            im1 = im.resize((tile_size, tile_size), ImageUtil.LANCZOS)
             if os.path.exists(tile_file_name):
-                im0 = Image.open(tile_file_name)
-                im1 = Image.composite(im1, im0, im1)
+                im0 = ImageUtil.open(tile_file_name)
+                im1 = ImageUtil.composite(im1, im0, im1)
 
             params = {}
             if options.tiledriver == "WEBP":
@@ -426,50 +477,48 @@ class TileCreator:
     @staticmethod
     def _get_pillow_image_resize_resampling(resampling: str) -> Literal[int]:
         if resampling == 'nearest' or resampling == 'near':
-            return Image.NEAREST
+            return ImageUtil.NEAREST
 
         if resampling == 'average' or resampling == 'bilinear':
-            return Image.BILINEAR
+            return ImageUtil.BILINEAR
 
         if resampling == 'cubic' or resampling == 'cubicspline':
-            return Image.BICUBIC
+            return ImageUtil.BICUBIC
 
         if resampling == 'lanczos':
-            return Image.LANCZOS
+            return ImageUtil.LANCZOS
 
         if resampling == 'antialias':
-            return Image.ANTIALIAS
+            return ImageUtil.ANTIALIAS
 
         if resampling == 'max':
-            return Image.MAXCOVERAGE
+            return ImageUtil.MAXCOVERAGE
 
         if resampling == 'med':
-            return Image.MEDIANCUT
+            return ImageUtil.MEDIANCUT
 
-        return Image.NEAREST
+        return ImageUtil.NEAREST
 
     @staticmethod
-    def _get_transparent_tile() -> Image:
-        return Image.new('RGBA', (256, 256), (255, 255, 255, 0))
+    def _concat_images_and_resize(images: List[PngImage], start_point: str, resampling: str) -> PngImage:
+        concatenated_tile = ImageUtil.new('RGBA', (512, 512))
+        if start_point == 'TOP_LEFT' or start_point == 'TOP_RIGHT':
+            concatenated_tile.paste(images[0], (0, 0))
+            concatenated_tile.paste(images[1], (0, 256))
+            concatenated_tile.paste(images[2], (256, 0))
+            concatenated_tile.paste(images[3], (256, 256))
+        else:
+            concatenated_tile.paste(images[0], (0, 256))
+            concatenated_tile.paste(images[1], (0, 0))
+            concatenated_tile.paste(images[2], (256, 256))
+            concatenated_tile.paste(images[3], (256, 0))
 
-    def _create_tile_if_file_tiles_exist(self, tile_request: TileCreateRequest):
-        images: list[Image] = []
-        for file in tile_request.files:
-            image = self._get_file_tile_image_if_exists(tile_request, file)
-            if image is None:
-                return
-            images.append(image)
+        # Resize the horizontally concatenated image to 256x256
+        resampling = TileCreator._get_pillow_image_resize_resampling(resampling)
+        resized_image = concatenated_tile.resize((256, 256), resampling)
+        concatenated_tile.close()
+        return resized_image
 
-        tile = Image.new('RGBA', (256, 256), (255, 255, 255, 0))
-        for image in images:
-            tile.paste(image, (0, 0), image)
-            image.close()
-
-        tile_path = tile_request.get_tile_path()
-        os.makedirs(os.path.dirname(tile_path), exist_ok=True)
-        tile.save(tile_path, "png")
-        tile.close()
-        for file in tile_request.files:
-            tile_file_path = tile_request.get_file_tile_path(file)
-            if os.path.exists(tile_file_path):
-                os.remove(tile_file_path)
+    @staticmethod
+    def _get_transparent_tile() -> PngImage:
+        return ImageUtil.new('RGBA', (256, 256), (255, 255, 255, 0))

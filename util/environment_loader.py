@@ -1,3 +1,5 @@
+import logging
+
 from model.rabbit_config import RabbitConfig
 from dotenv import load_dotenv
 import os
@@ -6,6 +8,8 @@ load_dotenv()
 
 
 def load_rabbit_config() -> RabbitConfig:
+    logger = logging.getLogger('loader')
+    logger.info('Loading rabbit configs ...')
 
     config = RabbitConfig()
     config.host = str(os.environ.get('RABBIT_HOST'))
@@ -27,3 +31,10 @@ def load_base_directory() -> str:
 def load_upload_base_directory() -> str:
     return str(os.environ.get('UPLOAD_BASE_DIRECTORY'))
 
+
+def load_app_version() -> str:
+    return str(os.environ.get('VERSION'))
+
+
+def load_create_tile_count_per_request() -> int:
+    return int(os.environ.get('CREATE_TILE_COUNT_PER_REQUEST'))

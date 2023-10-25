@@ -2,6 +2,7 @@ import os
 
 from pydantic import BaseModel
 from typing import List
+import copy
 
 from util.environment_loader import load_base_directory, load_upload_base_directory
 
@@ -31,6 +32,7 @@ class TileCreateRequest(RabbitMessage):
     z: int = 0
     x: int = 0
     y: int = 0
+    resampling: str = 'near'
     startCreateTileZoom: int = 0
     files: List[FileTileCreate] = []
     startPoint: str = 'TOP_LEFT'
@@ -67,19 +69,34 @@ class TileCreateRequest(RabbitMessage):
         returned = []
         for i in range(2):
             for j in range(2):
-                child = TileCreateRequest()
+                child: TileCreateRequest = copy.deepcopy(self)
                 child.z = self.z + 1
                 child.x = self.x * 2 + i
                 child.y = self.y * 2 + j
 
-                child.files += self.files
-                child.startPoint = self.startPoint
-                child.pattern = self.pattern
-                child.directory = self.directory
+                # child.files += self.files
+                # child.startPoint = self.startPoint
+                # child.pattern = self.pattern
+                # child.startCreateTileZoom = self.startCreateTileZoom
+                # child.resampling = self.resampling
+                # child.directory = self.directory
 
                 returned.append(child)
 
         return returned
+
+    def get_parent(self) -> 'TileCreateRequest':
+
+        parent: TileCreateRequest = copy.deepcopy(self)
+        parent.z = self.z - 1
+        parent.x = int(self.x / 2)
+        parent.y = int(self.y / 2)
+
+        # parent.files += self.files
+        # parent.startPoint = self.startPoint
+        # parent.pattern = self.pattern
+        # parent.directory = self.directory
+        return parent
 
     def exist(self) -> bool:
         tile_path = self.get_tile_path()

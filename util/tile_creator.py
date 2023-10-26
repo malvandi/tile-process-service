@@ -46,16 +46,15 @@ class TileCreator:
             self._create_tile_by_child(tile_request, self._create_tile_count_per_request)
 
     def _create_tile_by_child(self, tile_request: TileCreateRequest, max_create_tile: int) -> int:
-        if tile_request.exist():
-            return 0
-
-        if max_create_tile <= 0:
+        if tile_request.exist() or not tile_request.files or max_create_tile <= 0:
             return 0
 
         created_tiles = 0
         children = tile_request.get_children()
         for child in children:
-            self._remove_empty_files(tile_request)
+            self._remove_empty_files(child)
+            if not child.files:
+                continue
 
             if child.z >= child.startCreateTileZoom:
                 created_tiles += self._create_tile_by_origin_file(child, max_create_tile - created_tiles)
@@ -67,6 +66,9 @@ class TileCreator:
 
     def _create_tile_by_origin_file(self, tile_request: TileCreateRequest, max_create_tile: int) -> int:
         if tile_request.exist():
+            return 0
+
+        if not tile_request.files:
             return 0
 
         created_tiles = 0

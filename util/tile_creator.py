@@ -88,6 +88,9 @@ class TileCreator:
         return created_tiles
 
     def _create_tile_if_child_exists(self, tile_request: TileCreateRequest):
+        if tile_request.exist():
+            return
+
         children: List[TileCreateRequest] = tile_request.get_children()
         images = []
         for child in children:
@@ -243,6 +246,9 @@ class TileCreator:
         return True
 
     def _create_tile_if_file_tiles_exist(self, tile_request: TileCreateRequest):
+        if tile_request.exist():
+            return
+
         images: list[PngImage] = []
         for file in tile_request.files:
             image = self._get_file_tile_image_if_exists(tile_request, file)

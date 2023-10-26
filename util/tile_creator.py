@@ -265,6 +265,9 @@ class TileCreator:
             if os.path.exists(tile_file_path):
                 os.remove(tile_file_path)
 
+        parent = tile_request.get_parent()
+        self._create_tile_if_child_exists(parent)
+
     def _remove_empty_files(self, tile_request: TileCreateRequest):
         tile_request.files[:] = [file for file in tile_request.files if
                                  not self._is_empty_file_tile(tile_request, file)]

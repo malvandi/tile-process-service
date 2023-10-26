@@ -92,10 +92,6 @@ class TileCreateRequest(RabbitMessage):
         parent.x = int(self.x / 2)
         parent.y = int(self.y / 2)
 
-        # parent.files += self.files
-        # parent.startPoint = self.startPoint
-        # parent.pattern = self.pattern
-        # parent.directory = self.directory
         return parent
 
     def exist(self) -> bool:
@@ -105,6 +101,7 @@ class TileCreateRequest(RabbitMessage):
     def exist_file_tile(self, file: FileTileCreate) -> bool:
         file_tile_path = self.get_file_tile_path(file)
         return os.path.exists(file_tile_path)
+
 
 class LayerInfoRequest(RabbitMessage):
     id: str = ''

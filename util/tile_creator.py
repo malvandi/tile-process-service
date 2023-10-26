@@ -32,16 +32,13 @@ class TileCreator:
 
     def create_tile(self, tile_request: TileCreateRequest):
 
-        tile_file_path = tile_request.get_tile_path()
+        tile_path = tile_request.get_tile_path()
 
-        # if os.path.exists(tile_file_path):  # TODO(remove)
-        #     os.remove(tile_request.get_tile_path())
-
-        if os.path.exists(tile_file_path):
+        if os.path.exists(tile_path):
             return
 
-        tile_request.files[:] = [file for file in tile_request.files if
-                                 not self._is_empty_file_tile(tile_request, file)]
+        self._logger.debug('<<<<<< Request for create tile: %s >>>>>>' % tile_request.get_tile_path())
+        self._remove_empty_files(tile_request)
 
         if tile_request.z >= tile_request.startCreateTileZoom:
             self._create_tile_by_origin_file(tile_request, self._create_tile_count_per_request)
@@ -52,10 +49,15 @@ class TileCreator:
         if tile_request.exist():
             return 0
 
+        if max_create_tile <= 0:
+            return 0
+
         created_tiles = 0
         children = tile_request.get_children()
         for child in children:
-            if tile_request.z + 1 >= tile_request.startCreateTileZoom:
+            self._remove_empty_files(tile_request)
+
+            if child.z >= child.startCreateTileZoom:
                 created_tiles += self._create_tile_by_origin_file(child, max_create_tile - created_tiles)
             else:
                 created_tiles += self._create_tile_by_child(child, max_create_tile - created_tiles)
@@ -85,71 +87,6 @@ class TileCreator:
 
         return created_tiles
 
-    def _create_tile_file(self, tile_request: TileCreateRequest, file: FileTileCreate):
-
-        tile_path = tile_request.get_tile_path()
-        tile_file_path = tile_request.get_file_tile_path(file)
-        if os.path.exists(tile_path) or os.path.exists(tile_file_path):
-            return
-
-        if self._is_empty_file_tile(tile_request, file):
-            os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
-            self._get_transparent_tile().save(tile_file_path, format="png")
-            return
-
-        if file.startCreateTileZoom > tile_request.z:
-            self._create_file_tile_by_child(tile_request, file, 4)
-            return
-
-        self._create_file_tile_by_origin_file(tile_request, file)
-
-    def _create_file_tile_by_child(self, tile_request: TileCreateRequest, file: FileTileCreate,
-                                   max_create_tile: int) -> int:
-        if max_create_tile <= 0:
-            return 0
-
-        tile_path = tile_request.get_tile_path()
-        file_tile_path = tile_request.get_file_tile_path(file)
-        if os.path.exists(tile_path) or os.path.exists(file_tile_path):
-            return 0
-
-        if self._is_empty_file_tile(tile_request, file):
-            return 0
-
-        if tile_request.z >= file.startCreateTileZoom:
-            self._create_file_tile_by_origin_file(tile_request, file)
-            return 1
-
-        created_tiles = 0
-        children: List[TileCreateRequest] = tile_request.get_children()
-        random.shuffle(children)
-        for child in children:
-            if max_create_tile - created_tiles > 0:
-                created_tiles += self._create_file_tile_by_child(child, file, max_create_tile - created_tiles)
-
-        self._create_file_tile_if_child_exists(tile_request, file)
-
-        return created_tiles
-
-    def _create_file_tile_if_child_exists(self, tile_request: TileCreateRequest, file: FileTileCreate):
-        children: List[TileCreateRequest] = tile_request.get_children()
-        images = []
-        for child in children:
-            image = self._get_file_tile_image_if_exists(child, file)
-            if image is None:
-                return
-
-            images.append(image)
-
-        file_tile_image = self._concat_images_and_resize(images, tile_request.startPoint, file.resampling)
-
-        tile_file_path = tile_request.get_file_tile_path(file)
-        self._logger.debug('Creating file tile by children: %s' % tile_file_path)
-        os.makedirs(os.path.dirname(tile_file_path), exist_ok=True)
-        file_tile_image.save(tile_file_path, format="png")
-        file_tile_image.close()
-        self._create_tile_if_file_tiles_exist(tile_request)
-
     def _create_tile_if_child_exists(self, tile_request: TileCreateRequest):
         children: List[TileCreateRequest] = tile_request.get_children()
         images = []
@@ -167,7 +104,8 @@ class TileCreator:
         os.makedirs(os.path.dirname(tile_path), exist_ok=True)
         tile_image.save(tile_path, format="png")
         tile_image.close()
-        # TODO(create parent if is allowed)
+        parent = tile_request.get_parent()
+        self._create_tile_if_child_exists(parent)
 
     def _get_file_tile_image_if_exists(self, child: TileCreateRequest, file: FileTileCreate) -> PngImage | None:
         file_tile_path = child.get_file_tile_path(file)
@@ -327,7 +265,9 @@ class TileCreator:
             if os.path.exists(tile_file_path):
                 os.remove(tile_file_path)
 
-        parent = tile_request.get_children()
+    def _remove_empty_files(self, tile_request: TileCreateRequest):
+        tile_request.files[:] = [file for file in tile_request.files if
+                                 not self._is_empty_file_tile(tile_request, file)]
 
     @staticmethod
     def _get_tile_job_info(gdal_2_tiles: GDAL2Tiles) -> TileJobInfo:

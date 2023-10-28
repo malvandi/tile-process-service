@@ -51,6 +51,7 @@ class TileCreator:
 
         created_tiles = 0
         children = tile_request.get_children()
+        random.shuffle(children)
         for child in children:
             self._remove_empty_files(child)
             if not child.files:

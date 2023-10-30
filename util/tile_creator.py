@@ -33,6 +33,7 @@ class TileCreator:
     def create_tile(self, tile_request: TileCreateRequest):
 
         tile_path = tile_request.get_tile_path()
+        self._logger.info('Creating tile %s ...' % tile_path)
 
         if os.path.exists(tile_path):
             return
@@ -263,12 +264,14 @@ class TileCreator:
         tile = ImageUtil.new('RGBA', (256, 256), (255, 255, 255, 0))
         for image in images:
             tile.paste(image, (0, 0), image)
-            image.close()
 
         tile_path = tile_request.get_tile_path()
         os.makedirs(os.path.dirname(tile_path), exist_ok=True)
         tile.save(tile_path, "png")
         tile.close()
+        for image in images:
+            image.close()
+
         for file in tile_request.files:
             tile_file_path = tile_request.get_file_tile_path(file)
             if os.path.exists(tile_file_path):

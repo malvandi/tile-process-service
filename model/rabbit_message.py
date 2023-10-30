@@ -55,7 +55,10 @@ class TileCreateRequest(RabbitMessage):
 
     def get_tile_path(self) -> str:
         tile_path = self.get_directory_path() + '/' + self.pattern
-        return tile_path.replace('{z}', str(self.z)) \
+        sas_planet = "z%d/%d/x{x}/%d/y{y}" % (self.z + 1, int(self.x / 1024), int(self.y / 1024))
+
+        return tile_path.replace('SAS_PLANET', sas_planet) \
+            .replace('{z}', str(self.z)) \
             .replace('{x}', str(self.x)) \
             .replace('{y}', str(self.y))
 

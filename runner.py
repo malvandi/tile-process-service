@@ -79,6 +79,8 @@ class Runner:
         tile.z = 17
         tile.x = 84291
         tile.y = 79455
+
+        tile.pattern = 'morteza/SAS_PLANET.png'
         tile.startCreateTileZoom = 19
         tile.resampling = 'average'
         tile.startPoint = 'BOTTOM_LEFT'
@@ -91,7 +93,6 @@ class Runner:
         west_file = FileTileCreate()
         west_file.name = 'west.tif'
         tile.files.append(west_file)
-
 
         self._rabbit.channel.basic_publish(self._configs.exchange, 'TILE_CREATE_REQUEST', tile.model_dump_json())
 

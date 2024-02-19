@@ -33,7 +33,6 @@ class TileCreator:
     def create_tile(self, tile_request: TileCreateRequest):
 
         tile_path = tile_request.get_tile_path()
-        self._logger.info('Creating tile %s ...' % tile_path)
 
         if os.path.exists(tile_path):
             return
